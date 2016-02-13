@@ -15,6 +15,8 @@ PANIC_ON_BUG := 1
 #Re-enable wifi on WDI timeout
 RE_ENABLE_WIFI_ON_WDI_TIMEOUT := 0
 
+#Measure Roam Delay
+MEASURE_ROAM_TIME_DELAY := 0
 
 ifeq ($(CONFIG_CFG80211),y)
 HAVE_CFG80211 := 1
@@ -163,9 +165,9 @@ MAC_LIM_OBJS := $(MAC_SRC_DIR)/pe/lim/limAIDmgmt.o \
 		$(MAC_SRC_DIR)/pe/lim/limTrace.o \
 		$(MAC_SRC_DIR)/pe/lim/limUtils.o
 
-ifeq ($(CONFIG_QCOM_CCX),y)
-ifneq ($(CONFIG_QCOM_CCX_UPLOAD),y)
-MAC_LIM_OBJS += $(MAC_SRC_DIR)/pe/lim/limProcessCcxFrame.o
+ifeq ($(CONFIG_QCOM_ESE),y)
+ifneq ($(CONFIG_QCOM_ESE_UPLOAD),y)
+MAC_LIM_OBJS += $(MAC_SRC_DIR)/pe/lim/limProcessEseFrame.o
 endif
 endif
 
@@ -224,9 +226,9 @@ SME_CSR_OBJS := $(SME_SRC_DIR)/csr/csrApiRoam.o \
 		$(SME_SRC_DIR)/csr/csrNeighborRoam.o \
 		$(SME_SRC_DIR)/csr/csrUtil.o
 
-ifeq ($(CONFIG_QCOM_CCX),y)
-ifneq ($(CONFIG_QCOM_CCX_UPLOAD),y)
-SME_CSR_OBJS += $(SME_SRC_DIR)/csr/csrCcx.o
+ifeq ($(CONFIG_QCOM_ESE),y)
+ifneq ($(CONFIG_QCOM_ESE_UPLOAD),y)
+SME_CSR_OBJS += $(SME_SRC_DIR)/csr/csrEse.o
 endif
 endif
 
@@ -322,7 +324,8 @@ TL_INC := 	-I$(WLAN_ROOT)/$(TL_INC_DIR) \
 
 TL_OBJS := 	$(TL_SRC_DIR)/wlan_qct_tl.o \
 		$(TL_SRC_DIR)/wlan_qct_tl_ba.o \
-		$(TL_SRC_DIR)/wlan_qct_tl_hosupport.o
+		$(TL_SRC_DIR)/wlan_qct_tl_hosupport.o \
+               $(TL_SRC_DIR)/wlan_qct_tl_trace.o
 
 ############ VOSS ############
 VOSS_DIR :=	CORE/VOSS
@@ -341,7 +344,6 @@ VOSS_OBJS :=    $(VOSS_SRC_DIR)/vos_api.o \
 		$(VOSS_SRC_DIR)/vos_mq.o \
 		$(VOSS_SRC_DIR)/vos_nvitem.o \
 		$(VOSS_SRC_DIR)/vos_packet.o \
-		$(VOSS_SRC_DIR)/vos_power.o \
 		$(VOSS_SRC_DIR)/vos_sched.o \
 		$(VOSS_SRC_DIR)/vos_threads.o \
 		$(VOSS_SRC_DIR)/vos_timer.o \
@@ -494,23 +496,25 @@ CDEFINES :=	-DANI_BUS_TYPE_PLATFORM=1 \
 		-DWLAN_FEATURE_GTK_OFFLOAD \
 		-DWLAN_WAKEUP_EVENTS \
 	        -DWLAN_KD_READY_NOTIFIER \
+		-DWLAN_NL80211_TESTMODE \
 		-DFEATURE_WLAN_BATCH_SCAN \
 		-DFEATURE_WLAN_LPHB \
-		-DFEATURE_WLAN_CH144 \
+                -DFEATURE_WLAN_PAL_TIMER_DISABLE \
+                -DFEATURE_WLAN_PAL_MEM_DISABLE \
+                -DFEATURE_WLAN_CH144 \
                 -DWLAN_BUG_ON_SKB_ERROR \
                 -DWLAN_DXE_LOW_RESOURCE_TIMER \
-                -DWLAN_LOGGING_SOCK_SVC_ENABLE
-
-
-ifeq ($(strip $(BOARD_USES_UTAG_WIFI_MAC)),)
-CDEFINES += -DWLAN_NV_OTA_UPGRADE
-else
-CDEFINES += -DMOTO_UTAGS_MAC
-endif
+                -DWLAN_LOGGING_SOCK_SVC_ENABLE \
+                -DWLAN_FEATURE_LINK_LAYER_STATS \
+                -DWLAN_FEATURE_EXTSCAN
 
 ifneq ($(CONFIG_PRONTO_WLAN),)
 CDEFINES += -DWCN_PRONTO
 CDEFINES += -DWCN_PRONTO_V1
+endif
+
+ifeq ($(ENABLE_DRIVER_VERBOSE),1)
+CDEFINES += -DENABLE_DRIVER_VERBOSE
 endif
 
 ifeq ($(BUILD_DEBUG_VERSION),1)
@@ -537,10 +541,10 @@ CDEFINES += -DUSE_80211_WMMTSPEC_FOR_RIC
 endif
 endif
 
-ifeq ($(CONFIG_QCOM_CCX),y)
-CDEFINES += -DFEATURE_WLAN_CCX
-ifeq ($(CONFIG_QCOM_CCX_UPLOAD),y)
-CDEFINES += -DFEATURE_WLAN_CCX_UPLOAD
+ifeq ($(CONFIG_QCOM_ESE),y)
+CDEFINES += -DFEATURE_WLAN_ESE
+ifeq ($(CONFIG_QCOM_ESE_UPLOAD),y)
+CDEFINES += -DFEATURE_WLAN_ESE_UPLOAD
 endif
 endif
 
@@ -586,6 +590,13 @@ endif
 # enable the MAC Address auto-generation feature
 CDEFINES += -DWLAN_AUTOGEN_MACADDR_FEATURE
 
+# Moto read MACs from boot params instead of NV file
+ifeq ($(CONFIG_WLAN_MOTO_UTAGS_MAC),y)
+CDEFINES += -DMOTO_UTAGS_MAC
+else
+CDEFINES += -DWLAN_NV_OTA_UPGRADE
+endif
+
 ifeq ($(CONFIG_WLAN_FEATURE_11W),y)
 CDEFINES += -DWLAN_FEATURE_11W
 endif
@@ -604,7 +615,17 @@ ifeq ($(CONFIG_ENABLE_LINUX_REG), y)
 CDEFINES += -DCONFIG_ENABLE_LINUX_REG
 endif
 
+ifeq ($(MEASURE_ROAM_TIME_DELAY),1)
+CDEFINES += -DDEBUG_ROAM_DELAY
+endif
+
 CDEFINES += -DFEATURE_WLAN_CH_AVOID
+
+CDEFINES += -DHAVE_CBC_DONE
+
+CDEFINES += -DEXISTS_MSM_SMD
+
+CDEFINES += -DEXISTS_MSM_SMSM
 
 # Fix build for GCC 4.7
 EXTRA_CFLAGS += -Wno-maybe-uninitialized -Wno-unused-function -Wno-unused-variable
